@@ -13,9 +13,9 @@ MY_SECRET_KEY = os.environ.get("API_KEY", "your-super-secret-key")
 
 # ✅ Add your allowed domains here
 ALLOWED_DOMAINS = [
-    "yourwebsite.com",
-    "www.yourwebsite.com",
-    "sub.yourwebsite.com"
+    "https://affiliatetelegrambot-y6tu.onrender.com",
+    " ",
+    " "
 ]
 
 # 🧠 Headers for hanime.tv
