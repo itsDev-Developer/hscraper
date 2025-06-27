@@ -88,7 +88,7 @@ def search():
 
 
 # ▶️ /play for m3u8 & ts proxying
-@app.route("/play")
+@app.route("/proxy")
 def play_proxy():
     target_url = request.args.get("url")
     if not target_url:
