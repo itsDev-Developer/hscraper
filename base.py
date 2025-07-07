@@ -59,7 +59,7 @@ def check_api_key_and_domain():
 
 
 # 🔥 Home
-@app.route("/home")
+@app.route("/hm")
 def home():
     time = request.args.get("time", "month")
     page = request.args.get("page", 0)
