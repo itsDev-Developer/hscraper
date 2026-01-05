@@ -19,53 +19,83 @@ def convert():
 
     data = request.get_json()
     video_url = data.get('url')
-    
+    if not video_url:
+        return jsonify({"status": "error", "message": "Missing URL"}), 400
+
     stream_id = hashlib.md5(video_url.encode()).hexdigest()
     output_path = os.path.join(HLS_OUTPUT_DIR, stream_id)
     playlist_file = os.path.join(output_path, 'index.m3u8')
-    
+
     os.makedirs(output_path, exist_ok=True)
     base_server_url = request.host_url.rstrip('/').replace('http://', 'https://')
 
-    if not os.path.exists(playlist_file):
-        # NEW FFMPEG STRATEGY: 
-        # 1. Map all video and audio.
-        # 2. We use -sn to DISCARD subtitles initially to ensure the stream starts.
-        #    (Many HLS players crash on subtitle conversion issues).
-        # 3. We use -movflags +faststart for remote link efficiency.
-        
-        cmd = [
-            'ffmpeg', '-hide_banner', '-loglevel', 'error',
-            '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-            '-i', video_url,
-            '-map', '0:v:0',           # Map 1st video
-            '-map', '0:a',             # Map ALL audio
-            '-c:v', 'copy',             # Don't re-encode video
-            '-c:a', 'aac',              # Audio to AAC (Standard for HLS)
-            '-sn',                      # STRIP SUBTITLES (To prevent the crash you are seeing)
-            '-f', 'hls', 
-            '-hls_time', '10', 
-            '-hls_list_size', '0',
-            '-hls_segment_filename', os.path.join(output_path, 'seg_%03d.ts'),
-            playlist_file
-        ]
-        
-        subprocess.Popen(cmd)
+    # ✅ If playlist already exists, reuse it
+    if os.path.exists(playlist_file):
+        return jsonify({
+            "status": "success",
+            "hls_link": f"{base_server_url}/static/streams/{stream_id}/index.m3u8"
+        }), 200
 
-        # WAIT logic: Give FFmpeg 2 seconds to create the file before replying
-        # This prevents the 404 error on the very first request.
-        timeout = 5 
-        while not os.path.exists(playlist_file) and timeout > 0:
-            time.sleep(1)
-            timeout -= 1
+    # ✅ FIXED FFMPEG COMMAND
+    cmd = [
+        'ffmpeg', '-y',
+        '-hide_banner', '-loglevel', 'error',
+
+        # Network stability
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+
+        '-i', video_url,
+
+        # Map everything safely
+        '-map', '0:v',
+        '-map', '0:a?',
+        '-map', '0:s?',
+
+        # Video untouched
+        '-c:v', 'copy',
+
+        # Audio compatible with HLS
+        '-c:a', 'aac',
+        '-ac', '2',
+
+        # Subtitles → WebVTT (Video.js compatible)
+        '-c:s', 'webvtt',
+
+        # HLS FLAGS (VERY IMPORTANT)
+        '-f', 'hls',
+        '-hls_time', '6',
+        '-hls_list_size', '0',
+        '-hls_flags', 'independent_segments',
+        '-hls_playlist_type', 'event',
+
+        '-hls_segment_filename',
+        os.path.join(output_path, 'seg_%05d.ts'),
+
+        playlist_file
+    ]
+
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # ✅ Proper wait: ensure BOTH playlist + first segment exist
+    timeout = 10
+    while timeout > 0:
+        if os.path.exists(playlist_file):
+            segs = [f for f in os.listdir(output_path) if f.endswith('.ts')]
+            if len(segs) >= 1:
+                break
+        time.sleep(1)
+        timeout -= 1
 
     if os.path.exists(playlist_file):
         return jsonify({
             "status": "success",
             "hls_link": f"{base_server_url}/static/streams/{stream_id}/index.m3u8"
         }), 200
-    else:
-        return jsonify({"status": "error", "message": "FFmpeg failed to start stream"}), 500
+
+    return jsonify({"status": "error", "message": "FFmpeg failed"}), 500
+
 
 @app.route('/static/streams/<path:filename>')
 def custom_static(filename):
