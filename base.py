@@ -1,6 +1,7 @@
 import os
 import subprocess
 import hashlib
+import time
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
@@ -23,25 +24,25 @@ def convert():
     output_path = os.path.join(HLS_OUTPUT_DIR, stream_id)
     playlist_file = os.path.join(output_path, 'index.m3u8')
     
-    # Ensure folder exists
     os.makedirs(output_path, exist_ok=True)
-
-    # Force HTTPS for Render
     base_server_url = request.host_url.rstrip('/').replace('http://', 'https://')
 
     if not os.path.exists(playlist_file):
-        # UPDATED FFMPEG COMMAND
+        # NEW FFMPEG STRATEGY: 
+        # 1. Map all video and audio.
+        # 2. We use -sn to DISCARD subtitles initially to ensure the stream starts.
+        #    (Many HLS players crash on subtitle conversion issues).
+        # 3. We use -movflags +faststart for remote link efficiency.
+        
         cmd = [
             'ffmpeg', '-hide_banner', '-loglevel', 'error',
             '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
             '-i', video_url,
-            '-map', '0:v:0',           # Map first video track
-            '-map', '0:a?',             # Map all audio tracks
-            '-map', '0:s?',             # Map all subtitle tracks
-            '-c:v', 'copy',             # Fast copy video
-            '-c:a', 'aac',              # Audio to AAC
-            '-c:s', 'webvtt',           # Try to convert subtitles to webvtt
-            '-ignore_unknown',          # Ignore streams that can't be converted (fixes the crash)
+            '-map', '0:v:0',           # Map 1st video
+            '-map', '0:a',             # Map ALL audio
+            '-c:v', 'copy',             # Don't re-encode video
+            '-c:a', 'aac',              # Audio to AAC (Standard for HLS)
+            '-sn',                      # STRIP SUBTITLES (To prevent the crash you are seeing)
             '-f', 'hls', 
             '-hls_time', '10', 
             '-hls_list_size', '0',
@@ -49,22 +50,29 @@ def convert():
             playlist_file
         ]
         
-        # Start conversion
         subprocess.Popen(cmd)
 
-    return jsonify({
-        "status": "success",
-        "hls_link": f"{base_server_url}/static/streams/{stream_id}/index.m3u8"
-    }), 200
+        # WAIT logic: Give FFmpeg 2 seconds to create the file before replying
+        # This prevents the 404 error on the very first request.
+        timeout = 5 
+        while not os.path.exists(playlist_file) and timeout > 0:
+            time.sleep(1)
+            timeout -= 1
+
+    if os.path.exists(playlist_file):
+        return jsonify({
+            "status": "success",
+            "hls_link": f"{base_server_url}/static/streams/{stream_id}/index.m3u8"
+        }), 200
+    else:
+        return jsonify({"status": "error", "message": "FFmpeg failed to start stream"}), 500
 
 @app.route('/static/streams/<path:filename>')
 def custom_static(filename):
-    # This ensures the .m3u8 and .ts files are served with the correct headers
     response = send_from_directory(HLS_OUTPUT_DIR, filename)
     response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Content-Type", "application/vnd.apple.mpegurl" if filename.endswith('.m3u8') else "video/MP2T")
     return response
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
