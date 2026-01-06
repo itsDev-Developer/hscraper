@@ -39,37 +39,35 @@ def convert():
 
     # -------- SAFE FFMPEG COMMAND --------
     cmd = [
-        FFMPEG_BIN, "-y",
-        "-hide_banner", "-loglevel", "warning",
+    FFMPEG_BIN, "-y",
+    "-hide_banner", "-loglevel", "warning",
 
-        "-reconnect", "1",
-        "-reconnect_streamed", "1",
-        "-reconnect_delay_max", "5",
+    "-reconnect", "1",
+    "-reconnect_streamed", "1",
+    "-reconnect_delay_max", "5",
 
-        "-i", video_url,
+    "-i", video_url,
 
-        "-map", "0:v:0",
-        "-map", "0:a?",
+    # map video + all audio safely
+    "-map", "0:v:0",
+    "-map", "0:a?",
 
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-ac", "2",
+    "-c:v", "copy",
+    "-c:a", "aac",
+    "-ac", "2",
 
-        "-metadata:s:a:0", "language=eng",
-        "-metadata:s:a:1", "language=hin",
+    # IMPORTANT: remove LIVE flag
+    "-f", "hls",
+    "-hls_time", "6",
+    "-hls_list_size", "0",
+    "-hls_flags", "independent_segments",
 
-        "-f", "hls",
-        "-hls_time", "6",
-        # change the et
-        "-hls_playlist_type", "event",
+    "-hls_segment_filename",
+    os.path.join(out_dir, "seg_%05d.ts"),
 
-        "-hls_flags", "independent_segments",
+    playlist
+]
 
-        "-hls_segment_filename",
-        os.path.join(out_dir, "seg_%05d.ts"),
-
-        playlist
-    ]
 
     try:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
