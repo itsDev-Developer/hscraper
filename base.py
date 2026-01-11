@@ -1,6 +1,5 @@
 from flask import Flask, request, send_file, jsonify
 import yt_dlp
-import ytdlp
 import ffmpeg
 import os
 import uuid
