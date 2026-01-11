@@ -6,6 +6,8 @@ python-dotenv
 requests[socks]
 werkzeug
 flask-logging
+ffmpeg
 
 yt_dlp
+yt-dlp
 gunicorn
