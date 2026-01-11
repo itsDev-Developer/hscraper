@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import yt_dlp
 import os
 import uuid
@@ -15,7 +15,6 @@ def home():
 @app.route("/download", methods=["POST"])
 def download_video():
     data = request.get_json()
-
     if not data or "url" not in data:
         return jsonify({"error": "Video URL required"}), 400
 
@@ -34,11 +33,19 @@ def download_video():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
 
-        return send_file(
-            filepath,
-            as_attachment=True,
-            download_name="video.mp4"
-        )
+        return jsonify({
+            "status": "success",
+            "download_url": f"/file/{filename}"
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/file/<filename>")
+def serve_file(filename):
+    return send_from_directory(
+        DOWNLOAD_DIR,
+        filename,
+        as_attachment=True
+    )
