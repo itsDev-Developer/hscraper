@@ -66,3 +66,6 @@ def convert():
 
 
 if __name__ == "__main__":
+    # Start Flask server on port 8000 for Render
+    app.run(host="0.0.0.0", port=8000)
+
