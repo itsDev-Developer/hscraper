@@ -1,52 +1,74 @@
-from flask import Flask, request, jsonify, send_from_directory
-import yt_dlp
-import os
-import uuid
+from flask import Flask, request, jsonify
+from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-DOWNLOAD_DIR = "downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-@app.route("/")
-def home():
-    return {"status": "API running"}
+def extract_m3u8(video_url, timeout=60000):
+    m3u8_links = set()
 
-@app.route("/download", methods=["POST"])
-def download_video():
-    data = request.get_json()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
+
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
+        )
+
+        page = context.new_page()
+
+        def capture(response):
+            url = response.url
+            if ".m3u8" in url:
+                m3u8_links.add(url)
+
+        page.on("response", capture)
+
+        page.goto(video_url, wait_until="networkidle", timeout=timeout)
+        page.wait_for_timeout(5000)
+
+        browser.close()
+
+    return list(m3u8_links)
+
+
+@app.route("/convert", methods=["POST"])
+def convert():
+    data = request.get_json(silent=True)
+
     if not data or "url" not in data:
-        return jsonify({"error": "Video URL required"}), 400
+        return jsonify({
+            "status": "error",
+            "message": "Missing 'url' field"
+        }), 400
 
-    video_url = data["url"]
-    filename = f"{uuid.uuid4()}.mp4"
-    filepath = os.path.join(DOWNLOAD_DIR, filename)
-
-    ydl_opts = {
-        "outtmpl": filepath,
-        "format": "mp4",
-        "cookiefile": "cookies.txt",
-        "noplaylist": True,
-        "quiet": True
-    }
+    url = data["url"]
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
+        links = extract_m3u8(url)
 
         return jsonify({
             "status": "success",
-            "download_url": f"/file/{filename}"
+            "count": len(links),
+            "m3u8": links
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
-@app.route("/file/<filename>")
-def serve_file(filename):
-    return send_from_directory(
-        DOWNLOAD_DIR,
-        filename,
-        as_attachment=True
-    )
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
